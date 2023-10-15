@@ -1,0 +1,7 @@
+name: Sentry
+version: '${project.version}'
+main: dev.tryharddo.sentry.Sentry
+api-version: '1.20'
+authors: [TryHardDo (tf2levi)]
+description: This plugin brings the oppurtinity to create upgradeable sentry towers agaist mobs or other players.
+website: https://github.com/TryHardDo
