@@ -4,9 +4,11 @@ import dev.tryharddo.sentry.creatures.EntitySentry;
 import dev.tryharddo.sentry.registries.EntitySentryRegistry;
 
 import java.util.Iterator;
+import java.util.logging.Logger;
 
 public class SentryTickerTask implements Runnable {
     private final EntitySentryRegistry registry;
+    private final Logger logger = Logger.getLogger("SentryTickerTask");
 
     public SentryTickerTask(EntitySentryRegistry registry) {
         this.registry = registry;
@@ -14,21 +16,24 @@ public class SentryTickerTask implements Runnable {
 
     @Override
     public void run() {
-        Iterator<EntitySentry> iterator = registry.getRegisteredSentries().iterator();
+        try {
+            Iterator<EntitySentry> iterator = registry.getRegisteredSentries().values().iterator();
+            while (iterator.hasNext()) {
+                EntitySentry s = iterator.next();
+                if (!s.isValid()) {
+                    iterator.remove();
+                    continue;
+                }
 
-        while (iterator.hasNext()) {
-            EntitySentry sentry = iterator.next();
+                if (s.isDisabled()) {
+                    continue;
+                }
 
-            if (!sentry.isValid()) {
-                iterator.remove();
-                continue;
+                s.tick();
             }
-
-            if (sentry.isDisabled()) {
-                continue;
-            }
-
-            sentry.tick();
+        } catch (Exception ex) {
+            logger.severe("An error occurred while ticking task got executed! => " + ex.getMessage());
+            ex.printStackTrace();
         }
     }
 }

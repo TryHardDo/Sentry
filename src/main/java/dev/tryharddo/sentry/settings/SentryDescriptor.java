@@ -19,8 +19,10 @@ public class SentryDescriptor {
     private boolean showDisplayName = true;
     private double maxHealth = 20.0;
     private Sound attackSound = Sound.ENTITY_ZOMBIE_ATTACK_WOODEN_DOOR;
-    private int attackSpeed = 20;
-    private Class<? extends Projectile> ammoType = Arrow.class;
+    private int attackSpeed = 8;
+    private Class<? extends Projectile> ammoType = LlamaSpit.class;
+    private int reloadTickSpeed = 60;
+    private int magazineSize = 25;
 
     public SentryDescriptor(UUID owner) {
         this.addOwner(owner);
@@ -183,5 +185,21 @@ public class SentryDescriptor {
 
     public void setAmmoType(Class<? extends Projectile> ammoType) {
         this.ammoType = ammoType;
+    }
+
+    public int getReloadTickSpeed() {
+        return reloadTickSpeed;
+    }
+
+    public void setReloadTickSpeed(int reloadTickSpeed) {
+        this.reloadTickSpeed = reloadTickSpeed;
+    }
+
+    public int getMagazineSize() {
+        return magazineSize;
+    }
+
+    public void setMagazineSize(int magazineSize) {
+        this.magazineSize = magazineSize;
     }
 }

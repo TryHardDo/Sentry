@@ -1,34 +1,47 @@
 package dev.tryharddo.sentry.creatures;
 
-import dev.tryharddo.sentry.Sentry;
+import dev.tryharddo.sentry.events.SentryProjectileLaunchEvent;
+import dev.tryharddo.sentry.events.SentryTargetingEvent;
 import dev.tryharddo.sentry.settings.SentryDescriptor;
 import org.bukkit.*;
 import org.bukkit.entity.*;
+import org.bukkit.event.entity.EntityTargetEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.projectiles.ProjectileSource;
 import org.bukkit.util.EulerAngle;
 import org.bukkit.util.Vector;
-import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.UUID;
 
 public class EntitySentry implements InventoryHolder {
-    private static final String SENTRY_ID_DATA = "SentryId";
-    private static final String SENTRY_INVENTORY_DATA = "SentryInvId";
-    private static final HashMap<Class<? extends Projectile>, Material> validAmmoMap = new HashMap<>();
+    public static final NamespacedKey AMMO_MARKER_DATA;
+    public static final NamespacedKey SENTRY_ID_HOLDER_DATA;
+    public static final NamespacedKey SENTRY_INVENTORY_CONTENT_DATA;
+
+    static {
+        AMMO_MARKER_DATA = NamespacedKey.minecraft("sentry_ammo_marker_data");
+        SENTRY_ID_HOLDER_DATA = NamespacedKey.minecraft("sentry_id_data");
+        SENTRY_INVENTORY_CONTENT_DATA = NamespacedKey.minecraft("sentry_inventory_data");
+    }
+
     private final SentryDescriptor descriptor;
     private final ArmorStand sentryBody;
     private final Inventory sentryInventory;
     private boolean isDisabled = false;
-    private int tickCounter = 0;
+    private int ticksFromLastShoot = 0;
+    private int idleTickCounter = 0;
+    private int shootLeftBeforeReload;
 
     public EntitySentry(Location location, UUID owner) {
         this.descriptor = new SentryDescriptor(owner);
+        this.shootLeftBeforeReload = descriptor.getMagazineSize();
         this.sentryBody = this.constructBody(location);
 
         if (this.sentryBody == null) {
@@ -40,6 +53,7 @@ public class EntitySentry implements InventoryHolder {
 
     public EntitySentry(Location location, SentryDescriptor sentryDescriptor) {
         this.descriptor = sentryDescriptor;
+        this.shootLeftBeforeReload = descriptor.getMagazineSize();
         this.sentryBody = constructBody(location);
 
         if (this.sentryBody == null) {
@@ -49,12 +63,59 @@ public class EntitySentry implements InventoryHolder {
         this.sentryInventory = this.constructInventory();
     }
 
+    private static double calculatePitch(@NotNull Location sourceLocation, @NotNull Location targetLocation) {
+        double dx = targetLocation.getX() - sourceLocation.getX();
+        double dy = targetLocation.getY() - sourceLocation.getY();
+        double dz = targetLocation.getZ() - sourceLocation.getZ();
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return -Math.asin(dy / distance);
+    }
+
+    private static double calculateYaw(@NotNull Location sourceLocation, @NotNull Location targetLocation) {
+        double dx = targetLocation.getX() - sourceLocation.getX();
+        double dz = targetLocation.getZ() - sourceLocation.getZ();
+        double distanceXZ = Math.sqrt(dx * dx + dz * dz);
+        double yaw = Math.atan2(dx / distanceXZ, dz / distanceXZ);
+        if (yaw < 0) {
+            yaw += 2 * Math.PI;
+        }
+        return -yaw;
+    }
+
+    private static @NotNull Vector getShootingVector(@NotNull Location from, @NotNull Location to, float speed) {
+        double d0 = to.getY() - 1.100000023841858;
+        double d1 = to.getX() - from.getX();
+        double d2 = d0 - from.getY();
+        double d3 = to.getZ() - from.getZ();
+        double d4 = Math.sqrt(d1 * d1 + d3 * d3) * 0.20000000298023224;
+
+        Vector velocity = new Vector(d1, d2 + d4, d3);
+        velocity.normalize();
+        velocity.multiply(speed);
+
+        return velocity;
+    }
+
+    private static @NotNull Vector getShootingVector(@NotNull Location from, @NotNull Location to) {
+        return getShootingVector(from, to, 1.6f);
+    }
+
+    private static @NotNull List<LivingEntity> filterLivingEntities(@NotNull Collection<Entity> entities) {
+        List<LivingEntity> buffer = new ArrayList<>();
+
+        for (Entity e : entities) {
+            if (e instanceof LivingEntity) {
+                buffer.add(((LivingEntity) e));
+            }
+        }
+
+        return buffer;
+    }
+
     public void tick() {
         if (isDisabled) {
             return;
         }
-
-        tickCounter++;
 
         if (!sentryBody.isValid()) {
             return;
@@ -95,26 +156,49 @@ public class EntitySentry implements InventoryHolder {
                 return true;
             }
 
-            return !hasLineOfSight(sentryBody.getEyeLocation(), le.getEyeLocation());
+            return !hasLineOfSight(le.getEyeLocation());
         });
 
-        LivingEntity closestEntity = getClosestEntity(sentryBody.getLocation(), livingEntities);
+        LivingEntity closestEntity = getClosestEntity(livingEntities);
 
         if (closestEntity == null) {
             return;
         }
 
-        setHeadTargeting(sentryBody.getEyeLocation(), closestEntity.getEyeLocation());
+        SentryTargetingEvent targetingEvent = new SentryTargetingEvent(this, closestEntity, EntityTargetEvent.TargetReason.CLOSEST_ENTITY);
+        Bukkit.getPluginManager().callEvent(targetingEvent);
 
-        if (tickCounter % descriptor.getAttackSpeed() == 0) {
-            Vector shootingVec = getShootingVector(sentryBody.getEyeLocation(), closestEntity.getEyeLocation());
-            launchProjectile(sentryBody, shootingVec);
+        if (targetingEvent.isCancelled()) {
+            return;
+        }
+
+        setHeadTargeting(closestEntity.getEyeLocation());
+
+        if (shootLeftBeforeReload == 0) {
+            if (++idleTickCounter == descriptor.getReloadTickSpeed()) {
+                shootLeftBeforeReload = descriptor.getMagazineSize();
+                idleTickCounter = 0;
+                sentryBody.getWorld().playSound(sentryBody.getLocation(), Sound.BLOCK_PISTON_EXTEND, 1, 2);
+            }
+            return;
+        }
+
+        if (++ticksFromLastShoot % descriptor.getAttackSpeed() == 0) {
+            Projectile projectile = launchProjectile(closestEntity, descriptor.getAmmoType());
+
+            if (projectile == null) {
+                return;
+            }
 
             sentryWorld.playSound(sentryBody.getLocation(), descriptor.getAttackSound(), 1, 1);
+            shootLeftBeforeReload--;
+            ticksFromLastShoot = 0;
         }
     }
 
-    private void setHeadTargeting(@NotNull Location source, @NotNull Location target) {
+    private void setHeadTargeting(@NotNull Location target) {
+        Location source = sentryBody.getEyeLocation();
+
         double pitch = calculatePitch(source, target);
         double yaw = calculateYaw(source, target);
 
@@ -122,58 +206,35 @@ public class EntitySentry implements InventoryHolder {
         sentryBody.setRotation((float) Math.toDegrees(yaw), 0);
     }
 
-    @Contract("_, _ -> !null")
-    private @NotNull Projectile launchProjectile(@NotNull ProjectileSource source, Vector vector) {
-        return source.launchProjectile(descriptor.getAmmoType(), vector);
-    }
+    private @Nullable Projectile launchProjectile(@NotNull LivingEntity target, Class<? extends Projectile> projectile) {
+        Projectile proj = sentryBody.getWorld().spawn(sentryBody.getEyeLocation(), projectile, cp -> {
+            cp.setVelocity(getShootingVector(cp.getLocation(), target.getEyeLocation()));
+            cp.setShooter(sentryBody);
+        });
 
-    private double calculatePitch(@NotNull Location sourceLocation, @NotNull Location targetLocation) {
-        double dx = targetLocation.getX() - sourceLocation.getX();
-        double dy = targetLocation.getY() - sourceLocation.getY();
-        double dz = targetLocation.getZ() - sourceLocation.getZ();
-        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        return -Math.asin(dy / distance);
-    }
+        SentryProjectileLaunchEvent launchEvent = new SentryProjectileLaunchEvent(proj, this);
+        Bukkit.getPluginManager().callEvent(launchEvent);
 
-    private double calculateYaw(@NotNull Location sourceLocation, @NotNull Location targetLocation) {
-        double dx = targetLocation.getX() - sourceLocation.getX();
-        double dz = targetLocation.getZ() - sourceLocation.getZ();
-        double distanceXZ = Math.sqrt(dx * dx + dz * dz);
-        double yaw = Math.atan2(dx / distanceXZ, dz / distanceXZ);
-        if (yaw < 0) {
-            yaw += 2 * Math.PI;
+        if (launchEvent.isCancelled()) {
+            proj.remove();
+            return null;
         }
-        return -yaw;
-    }
 
-    private @NotNull Vector getShootingVector(@NotNull Location from, @NotNull Location to, float speed) {
-        double d0 = to.getY() - 1.100000023841858;
-        double d1 = to.getX() - from.getX();
-        double d2 = d0 - from.getY();
-        double d3 = to.getZ() - from.getZ();
-        double d4 = Math.sqrt(d1 * d1 + d3 * d3) * 0.20000000298023224;
-
-        Vector velocity = new Vector(d1, d2 + d4, d3);
-        velocity.normalize();
-        velocity.multiply(speed);
-
-        return velocity;
-    }
-
-    private @NotNull Vector getShootingVector(@NotNull Location from, @NotNull Location to) {
-        return getShootingVector(from, to, 1.6f);
+        PersistentDataContainer dataContainer = proj.getPersistentDataContainer();
+        dataContainer.set(AMMO_MARKER_DATA, PersistentDataType.BYTE, (byte) 1);
+        return proj;
     }
 
     private @NotNull Inventory constructInventory() {
         return Bukkit.createInventory(this, this.descriptor.getAmmoBagSize());
     }
 
-    private @Nullable LivingEntity getClosestEntity(Location location, @NotNull List<LivingEntity> mobs) {
+    private @Nullable LivingEntity getClosestEntity(@NotNull List<LivingEntity> mobs) {
         double closestDistance = Double.MAX_VALUE;
         LivingEntity closestEnt = null;
 
         for (LivingEntity ent : mobs) {
-            double distance = location.distance(ent.getLocation());
+            double distance = sentryBody.getLocation().distance(ent.getLocation());
             if (distance < closestDistance) {
                 closestDistance = distance;
                 closestEnt = ent;
@@ -181,18 +242,6 @@ public class EntitySentry implements InventoryHolder {
         }
 
         return closestEnt;
-    }
-
-    private @NotNull List<LivingEntity> filterLivingEntities(@NotNull Collection<Entity> entities) {
-        List<LivingEntity> buffer = new ArrayList<>();
-
-        for (Entity e : entities) {
-            if (e instanceof LivingEntity) {
-                buffer.add(((LivingEntity) e));
-            }
-        }
-
-        return buffer;
     }
 
     private @Nullable ArmorStand constructBody(@NotNull Location location) {
@@ -203,27 +252,29 @@ public class EntitySentry implements InventoryHolder {
         }
 
         ArmorStand as = ((ArmorStand) world.spawnEntity(location, EntityType.ARMOR_STAND));
+        PersistentDataContainer asDataContainer = as.getPersistentDataContainer();
+        asDataContainer.set(SENTRY_ID_HOLDER_DATA, PersistentDataType.STRING, descriptor.getSentryId().toString());
+
         as.setBasePlate(false);
         as.setCustomName(this.descriptor.getDisplayName());
         as.setCustomNameVisible(this.descriptor.isShowDisplayName());
+        as.setArms(true);
         as.setRemoveWhenFarAway(false);
-
-        PersistentDataContainer bodyContainer = as.getPersistentDataContainer();
-        bodyContainer.set(new NamespacedKey(Sentry.getInstance(), SENTRY_ID_DATA), PersistentDataType.STRING, this.descriptor.getSentryId().toString());
 
         return as;
     }
 
-    private boolean hasLineOfSight(@NotNull Location from, @NotNull Location to) {
-        Vector direction = to.toVector().subtract(from.toVector());
+    private boolean hasLineOfSight(@NotNull Location target) {
+        Location from = sentryBody.getEyeLocation();
+        Vector direction = target.toVector().subtract(from.toVector());
         double distance = direction.length();
         direction.normalize();
 
         World fromWorld = from.getWorld();
-        World toWorld = to.getWorld();
+        World toWorld = target.getWorld();
 
         if (fromWorld == null || toWorld == null) {
-            throw new NullPointerException("Both world (to) and (from) must not be null!");
+            throw new NullPointerException("Both world (target) and (from) must not be null!");
         }
 
         if (!fromWorld.getUID().equals(toWorld.getUID())) {
@@ -253,5 +304,9 @@ public class EntitySentry implements InventoryHolder {
 
     public SentryDescriptor getDescriptor() {
         return descriptor;
+    }
+
+    public ArmorStand getSentryBody() {
+        return this.sentryBody;
     }
 }
