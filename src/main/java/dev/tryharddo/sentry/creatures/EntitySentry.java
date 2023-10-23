@@ -3,7 +3,10 @@ package dev.tryharddo.sentry.creatures;
 import dev.tryharddo.sentry.events.SentryProjectileLaunchEvent;
 import dev.tryharddo.sentry.events.SentryTargetingEvent;
 import dev.tryharddo.sentry.settings.SentryDescriptor;
+import net.minecraft.world.level.Level;
 import org.bukkit.*;
+import org.bukkit.craftbukkit.v1_20_R2.CraftWorld;
+import org.bukkit.craftbukkit.v1_20_R2.entity.CraftLivingEntity;
 import org.bukkit.entity.*;
 import org.bukkit.event.entity.EntityTargetEvent;
 import org.bukkit.inventory.Inventory;
@@ -207,21 +210,25 @@ public class EntitySentry implements InventoryHolder {
     }
 
     private @Nullable Projectile launchProjectile(@NotNull LivingEntity target, Class<? extends Projectile> projectile) {
-        Projectile proj = sentryBody.getWorld().spawn(sentryBody.getEyeLocation(), projectile, cp -> {
-            cp.setVelocity(getShootingVector(cp.getLocation(), target.getEyeLocation()));
-            cp.setShooter(sentryBody);
-        });
+        Level level = ((CraftWorld) target.getWorld()).getHandle();
+        net.minecraft.world.entity.Entity projEntity = new net.minecraft.world.entity.projectile.Arrow(level, ((CraftLivingEntity) sentryBody).getHandle());
+
+        Projectile proj = (Projectile) (projEntity.getBukkitEntity());
+        Vector shootingVec = getShootingVector(sentryBody.getEyeLocation(), target.getEyeLocation());
+        proj.setVelocity(shootingVec);
+
+        PersistentDataContainer dataContainer = proj.getPersistentDataContainer();
+        dataContainer.set(AMMO_MARKER_DATA, PersistentDataType.BYTE, (byte) 1);
 
         SentryProjectileLaunchEvent launchEvent = new SentryProjectileLaunchEvent(proj, this);
         Bukkit.getPluginManager().callEvent(launchEvent);
 
         if (launchEvent.isCancelled()) {
-            proj.remove();
             return null;
         }
 
-        PersistentDataContainer dataContainer = proj.getPersistentDataContainer();
-        dataContainer.set(AMMO_MARKER_DATA, PersistentDataType.BYTE, (byte) 1);
+        level.addFreshEntity(projEntity);
+
         return proj;
     }
 
