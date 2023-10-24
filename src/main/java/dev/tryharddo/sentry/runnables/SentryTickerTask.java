@@ -1,6 +1,6 @@
 package dev.tryharddo.sentry.runnables;
 
-import dev.tryharddo.sentry.creatures.EntitySentry;
+import dev.tryharddo.sentry.creatures.CraftSentry;
 import dev.tryharddo.sentry.registries.EntitySentryRegistry;
 
 import java.util.Iterator;
@@ -17,9 +17,9 @@ public class SentryTickerTask implements Runnable {
     @Override
     public void run() {
         try {
-            Iterator<EntitySentry> iterator = registry.getRegisteredSentries().values().iterator();
+            Iterator<CraftSentry> iterator = registry.getRegisteredSentries().values().iterator();
             while (iterator.hasNext()) {
-                EntitySentry s = iterator.next();
+                CraftSentry s = iterator.next();
                 if (!s.isValid()) {
                     iterator.remove();
                     continue;
