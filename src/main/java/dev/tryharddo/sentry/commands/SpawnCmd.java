@@ -7,6 +7,7 @@ import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.craftbukkit.v1_20_R2.CraftWorld;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
@@ -33,8 +34,8 @@ public class SpawnCmd implements CommandExecutor {
             return true;
         }
 
-        EntitySentry entSentry = new EntitySentry(senderLoc, sender.getUniqueId());
-        sentry.getSentryRegistry().registerSentry(entSentry);
+        EntitySentry entSentry = new EntitySentry(serverLevel, senderLoc, sender.getUniqueId());
+        ((CraftWorld) serverLevel).getHandle().addFreshEntity(entSentry);
 
         sender.sendMessage("§aSpawn command execution must be a success!");
 
