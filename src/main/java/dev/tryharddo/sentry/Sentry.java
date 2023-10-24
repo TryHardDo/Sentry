@@ -59,7 +59,7 @@ public final class Sentry extends JavaPlugin {
     private void displayPluginInformation(@NotNull CommandSender messageTarget) {
         PluginDescriptionFile pluginDescriptionFile = this.getDescription();
         String[] stringCompound = new String[]{
-                "§c§lSentry §f- §cV§f" + pluginDescriptionFile.getVersion(),
+                "§c§lSentry §f- V§6" + pluginDescriptionFile.getVersion(),
                 "§fAuthors: §a" + String.join("§f, §a", pluginDescriptionFile.getAuthors()),
                 "§fCompatible API version: " + pluginDescriptionFile.getAPIVersion()
         };
