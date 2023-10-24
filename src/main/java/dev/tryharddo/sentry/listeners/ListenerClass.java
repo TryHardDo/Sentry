@@ -9,6 +9,4 @@ public class ListenerClass implements Listener {
     public ListenerClass(Sentry sentry) {
         this.sentry = sentry;
     }
-
-
 }

@@ -1,20 +1,20 @@
 package dev.tryharddo.sentry.events;
 
-import dev.tryharddo.sentry.creatures.EntitySentry;
+import dev.tryharddo.sentry.creatures.CraftSentry;
 import org.bukkit.entity.Entity;
 import org.bukkit.event.entity.EntityTargetEvent;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class SentryTargetingEvent extends EntityTargetEvent {
-    private final EntitySentry entitySentry;
+    private final CraftSentry craftSentry;
 
-    public SentryTargetingEvent(@NotNull EntitySentry entity, @Nullable Entity target, @NotNull EntityTargetEvent.TargetReason reason) {
+    public SentryTargetingEvent(@NotNull CraftSentry entity, @Nullable Entity target, @NotNull EntityTargetEvent.TargetReason reason) {
         super(entity.getSentryBody(), target, reason);
-        this.entitySentry = entity;
+        this.craftSentry = entity;
     }
 
-    public EntitySentry getSentry() {
-        return entitySentry;
+    public CraftSentry getSentry() {
+        return craftSentry;
     }
 }

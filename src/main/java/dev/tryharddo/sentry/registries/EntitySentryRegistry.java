@@ -1,6 +1,6 @@
 package dev.tryharddo.sentry.registries;
 
-import dev.tryharddo.sentry.creatures.EntitySentry;
+import dev.tryharddo.sentry.creatures.CraftSentry;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -8,9 +8,9 @@ import java.util.HashMap;
 import java.util.UUID;
 
 public class EntitySentryRegistry {
-    private final HashMap<UUID, EntitySentry> registeredSentries;
+    private final HashMap<UUID, CraftSentry> registeredSentries;
 
-    public EntitySentryRegistry(HashMap<UUID, EntitySentry> sentries) {
+    public EntitySentryRegistry(HashMap<UUID, CraftSentry> sentries) {
         registeredSentries = sentries;
     }
 
@@ -19,21 +19,21 @@ public class EntitySentryRegistry {
     }
 
     /**
-     * Registers an EntitySentry in the sentry registry.
+     * Registers an CraftSentry in the sentry registry.
      *
-     * @param entitySentry the sentry entity
+     * @param craftSentry the sentry entity
      * @return null if no swap happened or the previous value was null
-     * or the swapped EntitySentry object.
+     * or the swapped CraftSentry object.
      */
-    public @Nullable EntitySentry registerSentry(@NotNull EntitySentry entitySentry) {
-        return registeredSentries.put(entitySentry.getDescriptor().getSentryId(), entitySentry);
+    public @Nullable CraftSentry registerSentry(@NotNull CraftSentry craftSentry) {
+        return registeredSentries.put(craftSentry.getDescriptor().getSentryId(), craftSentry);
     }
 
-    public EntitySentry unregisterSentry(@NotNull EntitySentry entitySentry) {
-        return registeredSentries.remove(entitySentry.getDescriptor().getSentryId());
+    public CraftSentry unregisterSentry(@NotNull CraftSentry craftSentry) {
+        return registeredSentries.remove(craftSentry.getDescriptor().getSentryId());
     }
 
-    public @Nullable EntitySentry getBySentryId(UUID sentryUUID) {
+    public @Nullable CraftSentry getBySentryId(UUID sentryUUID) {
         return registeredSentries.get(sentryUUID);
     }
 
@@ -43,7 +43,7 @@ public class EntitySentryRegistry {
      *
      * @return the registered sentries hash map
      */
-    public HashMap<UUID, EntitySentry> getRegisteredSentries() {
+    public HashMap<UUID, CraftSentry> getRegisteredSentries() {
         return registeredSentries;
     }
 
@@ -54,8 +54,8 @@ public class EntitySentryRegistry {
      * @return a map containing all the sentries that the user has owner access,
      * or an empty hash map if none exists.
      */
-    public HashMap<UUID, EntitySentry> getPlayerSentries(UUID ownerId) {
-        HashMap<UUID, EntitySentry> owned = new HashMap<>();
+    public HashMap<UUID, CraftSentry> getPlayerSentries(UUID ownerId) {
+        HashMap<UUID, CraftSentry> owned = new HashMap<>();
 
         registeredSentries.forEach((id, sentry) -> {
             if (!sentry.getDescriptor().getSentryOwners().contains(ownerId)) {
