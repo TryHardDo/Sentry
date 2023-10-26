@@ -12,14 +12,14 @@ public class SentryDescriptor {
     private HashSet<UUID> sentryOwners = new HashSet<>();
     private HashSet<EntityType> mobWhiteList = new HashSet<>();
     private HashSet<UUID> playerWhiteList = new HashSet<>();
-    private int attackRadius = 5;
+    private int attackRadius = 20;
     private int ammoBagSize = 9;
     private double damageMultiplier = 1.0;
     private String displayName = "Sentry";
     private boolean showDisplayName = true;
     private double maxHealth = 20.0;
     private Sound attackSound = Sound.ENTITY_ZOMBIE_ATTACK_WOODEN_DOOR;
-    private int attackSpeed = 8;
+    private int attackSpeed = 3;
     private Class<? extends Projectile> ammoType = LlamaSpit.class;
     private int reloadTickSpeed = 60;
     private int magazineSize = 25;

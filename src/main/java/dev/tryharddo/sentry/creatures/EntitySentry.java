@@ -1,6 +1,7 @@
 package dev.tryharddo.sentry.creatures;
 
 import dev.tryharddo.sentry.settings.SentryDescriptor;
+import dev.tryharddo.sentry.utils.MathUtils;
 import net.minecraft.core.Rotations;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
@@ -12,27 +13,31 @@ import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.Vec3;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.v1_20_R2.CraftWorld;
+import org.bukkit.craftbukkit.v1_20_R2.entity.CraftEntity;
 import org.bukkit.craftbukkit.v1_20_R2.entity.CraftLivingEntity;
 import org.bukkit.craftbukkit.v1_20_R2.event.CraftEventFactory;
-import org.bukkit.entity.Entity;
 import org.bukkit.event.entity.EntityShootBowEvent;
 import org.bukkit.util.BoundingBox;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 public class EntitySentry extends ArmorStand implements RangedAttackMob {
     private final SentryDescriptor sentryDescriptor;
     private boolean isDisabled = false;
     private int ammoMagazineCounter;
+    private static final int memoryThreshold = 200;
     private int lastShootTicks = 0;
     private int idleTicks = 0;
+    private UUID memorizedEnemyUUID = null;
+    private int lastSeenMemorizedEnemyTicks = 0;
 
     public EntitySentry(World world, @NotNull Location location, UUID owner) {
         super(EntityType.ARMOR_STAND, ((CraftWorld) world).getHandle());
@@ -40,25 +45,6 @@ public class EntitySentry extends ArmorStand implements RangedAttackMob {
         this.setPos(location.getX(), location.getY(), location.getZ());
 
         this.ammoMagazineCounter = this.sentryDescriptor.getAmmoBagSize();
-    }
-
-    private static double calculatePitch(@NotNull Location sourceLocation, @NotNull Location targetLocation) {
-        double dx = targetLocation.getX() - sourceLocation.getX();
-        double dy = targetLocation.getY() - sourceLocation.getY();
-        double dz = targetLocation.getZ() - sourceLocation.getZ();
-        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        return -Math.asin(dy / distance);
-    }
-
-    private static double calculateYaw(@NotNull Location sourceLocation, @NotNull Location targetLocation) {
-        double dx = targetLocation.getX() - sourceLocation.getX();
-        double dz = targetLocation.getZ() - sourceLocation.getZ();
-        double distanceXZ = Math.sqrt(dx * dx + dz * dz);
-        double yaw = Math.atan2(dx / distanceXZ, dz / distanceXZ);
-        if (yaw < 0) {
-            yaw += 2 * Math.PI;
-        }
-        return -yaw;
     }
 
     @Override
@@ -74,40 +60,67 @@ public class EntitySentry extends ArmorStand implements RangedAttackMob {
         Location bukkitLoc = new Location(world, this.getX(), this.getY(), this.getZ());
         BoundingBox boundingBox = BoundingBox.of(bukkitLoc, attackRange, attackRange, attackRange);
 
-        Collection<Entity> nearbyEnt = world.getNearbyEntities(boundingBox);
+        Collection<org.bukkit.entity.LivingEntity> nearbyLivingEntities = world.getNearbyEntities(boundingBox).stream()
+                .filter(entity -> entity instanceof org.bukkit.entity.LivingEntity)
+                .map(entity -> (org.bukkit.entity.LivingEntity) entity)
+                .collect(Collectors.toSet());
 
-        if (nearbyEnt.isEmpty()) return;
+        if (nearbyLivingEntities.isEmpty()) return;
 
-        Collection<Entity> goodEntColl = new HashSet<>();
+        nearbyLivingEntities.removeIf(le -> {
+            if (!le.isValid()) return true;
+            if (le.getUniqueId().equals(this.uuid)) return true;
+            if (this.sentryDescriptor.getSentryOwners().contains(le.getUniqueId())) return true;
+            if (this.sentryDescriptor.getMobWhiteList().contains(le.getType())) return true;
+            return !this.hasLineOfSight(((CraftEntity) le).getHandle());
+        });
 
-        for (Entity e : nearbyEnt) {
-            if (!e.isValid()) continue;
-            if (e.getUniqueId().equals(this.uuid)) continue;
-            if (sentryDescriptor.getSentryOwners().contains(e.getUniqueId())) continue;
-            if (sentryDescriptor.getMobWhiteList().contains(e.getType())) continue;
-
-            // Line of sight
-            goodEntColl.add(e);
+        org.bukkit.entity.LivingEntity attackTarget = null;
+        for (org.bukkit.entity.LivingEntity livingEntity : nearbyLivingEntities) {
+            if (livingEntity.getUniqueId().equals(this.memorizedEnemyUUID) &&
+            this.lastSeenMemorizedEnemyTicks < memoryThreshold) {
+                attackTarget = livingEntity;
+                break;
+            }
         }
 
-        org.bukkit.entity.LivingEntity closestEnt = this.getClosestLivingEntity(goodEntColl);
+        if (attackTarget == null) {
+            ++this.lastSeenMemorizedEnemyTicks;
+            if (this.lastSeenMemorizedEnemyTicks > memoryThreshold) {
+                this.resetMemory();
+            }
 
-        if (closestEnt == null) return;
+            attackTarget = this.getClosestLivingEntity(nearbyLivingEntities);
+        }
 
-        if (ammoMagazineCounter == 0) {
-            if (++idleTicks == sentryDescriptor.getReloadTickSpeed()) {
-                ammoMagazineCounter = sentryDescriptor.getMagazineSize();
-                idleTicks = 0;
-                // Sound play
+        if (attackTarget == null) return;
+
+        Location ceLoc = attackTarget.getEyeLocation();
+        this.setHeadTargeting(ceLoc.getX(), ceLoc.getY(), ceLoc.getZ());
+
+        if (this.ammoMagazineCounter == 0) {
+            ++this.idleTicks;
+            if (this.idleTicks == this.sentryDescriptor.getReloadTickSpeed()) {
+                this.ammoMagazineCounter = this.sentryDescriptor.getMagazineSize();
+                this.idleTicks = 0;
+                this.lastShootTicks = 0;
+
+                this.playSound(SoundEvents.PISTON_EXTEND, 1.0f, 1.5f);
             }
 
             return;
         }
 
-        if (++lastShootTicks % sentryDescriptor.getAttackSpeed() == 0) {
-            this.performRangedAttack(((CraftLivingEntity) closestEnt).getHandle(), 1.0F);
-            ammoMagazineCounter--;
-            lastShootTicks = 0;
+        ++this.lastShootTicks;
+        if (this.lastShootTicks % this.sentryDescriptor.getAttackSpeed() == 0) {
+            this.performRangedAttack(((CraftLivingEntity) attackTarget).getHandle(), 1.0F);
+
+            if (this.memorizedEnemyUUID == null) {
+                this.memorizedEnemyUUID = attackTarget.getUniqueId();
+            }
+
+            this.ammoMagazineCounter--;
+            this.lastShootTicks = 0;
         }
     }
 
@@ -132,6 +145,11 @@ public class EntitySentry extends ArmorStand implements RangedAttackMob {
         this.ammoMagazineCounter = magazineCount;
     }
 
+    private void resetMemory() {
+        this.lastSeenMemorizedEnemyTicks = 0;
+        this.memorizedEnemyUUID = null;
+    }
+
     @Override
     public void performRangedAttack(LivingEntity livingEntity, float v) {
         ItemStack itemstack = this.getProjectile(this.getItemInHand(ProjectileUtil.getWeaponHoldingHand(this, Items.BOW)));
@@ -149,36 +167,35 @@ public class EntitySentry extends ArmorStand implements RangedAttackMob {
                 this.level().addFreshEntity(entArrow);
             }
 
-            this.playSound(SoundEvents.SKELETON_SHOOT, 1.0F, 1.0F / (this.getRandom().nextFloat() * 0.4F + 0.8F));
+            this.playSound(SoundEvents.ZOMBIE_ATTACK_WOODEN_DOOR, 1.0F, 1.0F / (this.getRandom().nextFloat() * 0.4F + 0.8F));
         }
     }
 
-    private @Nullable org.bukkit.entity.LivingEntity getClosestLivingEntity(@NotNull Collection<org.bukkit.entity.Entity> entities) {
+    private @Nullable org.bukkit.entity.LivingEntity getClosestLivingEntity(@NotNull Collection<org.bukkit.entity.LivingEntity> entities) {
         double closestDistance = Double.MAX_VALUE;
         org.bukkit.entity.LivingEntity closestEnt = null;
 
-        for (org.bukkit.entity.Entity ent : entities) {
-            if (!(ent instanceof org.bukkit.entity.LivingEntity)) continue;
-
-            org.bukkit.entity.LivingEntity le = ((org.bukkit.entity.LivingEntity) ent);
+        for (org.bukkit.entity.LivingEntity ent : entities) {
             Location bukkitLoc = new Location(this.level().getWorld(), this.getX(), this.getY(), this.getZ());
             double distance = bukkitLoc.distance(ent.getLocation());
             if (distance < closestDistance) {
                 closestDistance = distance;
-                closestEnt = le;
+                closestEnt = ent;
             }
         }
 
         return closestEnt;
     }
 
-    private void setHeadTargeting(@NotNull Location target) {
-        Location source = this.getBukkitEntity().getLocation();
+    private void setHeadTargeting(double x, double y, double z) {
+        Vec3 posVec = this.position();
+        double pitch = MathUtils.computePitch(posVec.x(), posVec.y(), posVec.z(), x, y, z);
+        double yaw = MathUtils.computeYaw(posVec.x(), posVec.z(), x, z);
 
-        double pitch = calculatePitch(source, target);
-        double yaw = calculateYaw(source, target);
-
-        this.headPose = new Rotations((float) pitch, 0, 0);
+        this.setHeadPose(new Rotations((float)Math.toDegrees(pitch), 0, 0));
+        this.setYHeadRot((float)Math.toDegrees(yaw));
+        this.setYRot((float)Math.toDegrees(yaw));
+        this.yRotO = (float)Math.toDegrees(yaw);
     }
 
     protected AbstractArrow getArrow(ItemStack itemstack, float f) {
